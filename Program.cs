@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SocketSingleSend
@@ -12,7 +14,7 @@ namespace SocketSingleSend
     {
         private const string ANSWER_FLAG = ">>OK<<";
         private const int MAX_BYTE_SIZE = 256;
-        static readonly IPAddress localIP = Dns.GetHostByName(Dns.GetHostName()).AddressList[0];
+        static readonly IPAddress localIP = Dns.GetHostAddresses(Dns.GetHostName())[1];
         static readonly int PORT = 10019;
         static readonly int AS_PORT = 11019;
 
@@ -20,9 +22,12 @@ namespace SocketSingleSend
         static Socket udpReceiver;
 
         static void Main(string[] args)
-        {
-            Console.WriteLine("1: Send ;\r\n2: Receive ;");
-            Console.WriteLine("Make a choice to do:");
+        {            
+            Console.WriteLine("1. Send ;\r\n2. Receive ;");
+#if DEBUG
+            Console.WriteLine("3. Loop Send ;");
+#endif
+            Console.WriteLine("Make a choice to do(1 or 2):");
 
             string choice = Console.ReadLine();
             if (choice == "1")
@@ -77,6 +82,26 @@ namespace SocketSingleSend
                         Console.WriteLine(msg);
                 } while (msg != "exit");
             }
+#if DEBUG
+            else if (choice == "3")
+            {
+                //Loop Send Test
+                IPAddress targetIP = null;
+                string str = null;
+                int count = 0;
+                Console.WriteLine("Enter the other side's IP:");
+                targetIP = IPAddress.Parse(Console.ReadLine());
+                Console.WriteLine("-----------------------------------");
+                while (true)
+                {
+                    str = $"Send Test {++count} -> {DateTime.Now.ToShortTimeString()}";
+                    Console.WriteLine(str);
+                    if (!SendText(str, targetIP))
+                        Console.WriteLine("<<<<<<<<<<<The other side may not have received!");
+                    Thread.Sleep(5000);
+                }
+            }
+#endif
             udpReceiver?.Close();
             udpSender?.Close();
         }
@@ -98,7 +123,12 @@ namespace SocketSingleSend
                 {
                     count--;
                     if (UDPSend(ANSWER_FLAG, answerIPE))
+                    {
+#if DEBUG
+                        Console.WriteLine("<<<<<<<<send '{0}' to: {1}", ANSWER_FLAG, answerIPE);
+#endif
                         break;
+                    }
                 }
             }
             return receiveStr;
@@ -114,7 +144,11 @@ namespace SocketSingleSend
             if (UDPSend(str, targetIPE))
             {
                 //Receive answer
-                if (UDPReceive(answerIPE, ref remoteIPE, false) == ANSWER_FLAG)
+                string answerStr = UDPReceive(answerIPE, ref remoteIPE, false);
+#if DEBUG
+                Console.WriteLine(">>>>>>>>>get '{0}' from: {1}", answerStr, remoteIPE);
+#endif
+                if (answerStr == ANSWER_FLAG)
                     return true;
             }
             return false;
@@ -136,7 +170,12 @@ namespace SocketSingleSend
                 if (sendLen == strByte.Length)
                     return true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message);
+#endif
+            }
             return false;
         }
 
@@ -161,7 +200,12 @@ namespace SocketSingleSend
                 if (receiveLen > 0)
                     return Encoding.UTF8.GetString(strByte, 0, receiveLen);
             }
-            catch { }
+            catch (Exception ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message);
+#endif
+            }
             return null;
         }
 
