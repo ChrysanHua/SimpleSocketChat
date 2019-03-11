@@ -22,17 +22,19 @@ namespace SocketSingleSend
         static Socket udpReceiver;
 
         static void Main(string[] args)
-        {            
+        {
             Console.WriteLine("1. Send ;\r\n2. Receive ;");
 #if DEBUG
             Console.WriteLine("3. Loop Send ;");
 #endif
             Console.WriteLine("Make a choice to do(1 or 2):");
+            //实现IP检测，即通信开始前发送IP
 
             string choice = Console.ReadLine();
             if (choice == "1")
             {
                 //do Send
+                InitSocket("UDP", true);
                 IPAddress targetIP = null;
                 bool flag = false;
                 while (!flag)
@@ -54,7 +56,7 @@ namespace SocketSingleSend
                 do
                 {
                     str = Console.ReadLine();
-                    if (str.Length > (MAX_BYTE_SIZE / 2 - 2))
+                    if (str.Length > (MAX_BYTE_SIZE / 2 - 8))
                     {
                         Console.WriteLine("<<<<<<<<<<<Too Long!");
                         continue;
@@ -71,13 +73,14 @@ namespace SocketSingleSend
             else if (choice == "2")
             {
                 //do Receive
+                InitSocket("UDP", false);
                 Console.WriteLine("Local IP is: " + localIP);
                 Console.WriteLine("Waiting to receive the Msg...");
                 Console.WriteLine("-----------------------------------");
                 string msg = null;
                 do
                 {
-                    msg = ReceiveText(localIP);
+                    msg = ReceiveText();
                     if (msg != null)
                         Console.WriteLine(msg);
                 } while (msg != "exit");
@@ -86,6 +89,7 @@ namespace SocketSingleSend
             else if (choice == "3")
             {
                 //Loop Send Test
+                InitSocket("UDP", true);
                 IPAddress targetIP = null;
                 string str = null;
                 int count = 0;
@@ -106,13 +110,12 @@ namespace SocketSingleSend
             udpSender?.Close();
         }
 
-        static string ReceiveText(IPAddress listenIP)
+        static string ReceiveText()
         {
-            IPEndPoint listenIPE = new IPEndPoint(listenIP, PORT);
             IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
             EndPoint remoteIPE = sender;
             //UDP Mode
-            string receiveStr = UDPReceive(listenIPE, ref remoteIPE);
+            string receiveStr = UDPReceive(ref remoteIPE);
             if (receiveStr != null)
             {
                 //Send answer
@@ -122,7 +125,7 @@ namespace SocketSingleSend
                 while (count > 0)
                 {
                     count--;
-                    if (UDPSend(ANSWER_FLAG, answerIPE))
+                    if (UDPSend(ANSWER_FLAG + receiveStr, answerIPE))
                     {
 #if DEBUG
                         Console.WriteLine("<<<<<<<<send '{0}' to: {1}", ANSWER_FLAG, answerIPE);
@@ -137,32 +140,31 @@ namespace SocketSingleSend
         static bool SendText(string str, IPAddress targetIP)
         {
             IPEndPoint targetIPE = new IPEndPoint(targetIP, PORT);
-            IPEndPoint answerIPE = new IPEndPoint(localIP, AS_PORT);
             IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
             EndPoint remoteIPE = sender;
             //UDP Mode
+            //clean up the buffer
+            FlushReceiveBuf();
             if (UDPSend(str, targetIPE))
             {
                 //Receive answer
-                string answerStr = UDPReceive(answerIPE, ref remoteIPE, false);
+                string answerStr = null;
+                do
+                {
+                    answerStr = UDPReceive(ref remoteIPE);
 #if DEBUG
-                Console.WriteLine(">>>>>>>>>get '{0}' from: {1}", answerStr, remoteIPE);
+                    Console.WriteLine(">>>>>>>>>get '{0}' from: {1}", answerStr, remoteIPE);
 #endif
-                if (answerStr == ANSWER_FLAG)
-                    return true;
+                    if (answerStr != null &&
+                        answerStr.StartsWith(ANSWER_FLAG) && answerStr.EndsWith(str))
+                        return true;
+                } while (answerStr != null);
             }
             return false;
         }
 
         static bool UDPSend(string str, EndPoint targetIPE)
         {
-            if (udpSender == null)
-            {
-                udpSender = new Socket(AddressFamily.InterNetwork,
-                SocketType.Dgram, ProtocolType.Udp);
-                udpSender.SendTimeout = 800;
-            }
-
             try
             {
                 byte[] strByte = Encoding.UTF8.GetBytes(str);
@@ -179,19 +181,8 @@ namespace SocketSingleSend
             return false;
         }
 
-        static string UDPReceive(EndPoint listenIPE, ref EndPoint remoteIPE, bool blocked = true)
+        static string UDPReceive(ref EndPoint remoteIPE)
         {
-            if (udpReceiver == null)
-            {
-                //Receive_Socket的首次创建导致错过Answer信号的接收-------提升Socket创建顺序
-                //answerReceive网络缓冲区的旧数据导致收到“假Answer”------添加Answer校对
-                udpReceiver = new Socket(AddressFamily.InterNetwork,
-                SocketType.Dgram, ProtocolType.Udp);
-                udpReceiver.Bind(listenIPE);
-                if (!blocked)
-                    udpReceiver.ReceiveTimeout = 2500;
-            }
-            
             try
             {
                 byte[] strByte = new byte[MAX_BYTE_SIZE];
@@ -207,6 +198,45 @@ namespace SocketSingleSend
 #endif
             }
             return null;
+        }
+
+        static void InitSocket(string protocolMode, bool sendMode)
+        {
+            //Init Socket
+            if (protocolMode == "UDP")
+            {
+                udpReceiver = new Socket(AddressFamily.InterNetwork,
+                    SocketType.Dgram, ProtocolType.Udp);
+                udpSender = new Socket(AddressFamily.InterNetwork,
+                    SocketType.Dgram, ProtocolType.Udp)
+                {
+                    SendTimeout = 800
+                };
+                if (sendMode)
+                {
+                    udpReceiver.Bind(new IPEndPoint(localIP, AS_PORT));
+                    udpReceiver.ReceiveTimeout = 2500;
+                }
+                else
+                    udpReceiver.Bind(new IPEndPoint(localIP, PORT));
+            }
+        }
+
+        static void FlushReceiveBuf()
+        {
+            //this method will only be invoked before receiving a answer
+            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint remoteIPE = sender;
+            //clean up the Receive Buffer
+            while (udpReceiver.Available != 0)
+            {
+#if DEBUG
+                Console.WriteLine("---------get '{0}' from: {1}",
+                    UDPReceive(ref remoteIPE), remoteIPE);
+#else
+                UDPReceive(ref remoteIPE);
+#endif
+            }
         }
 
     }
