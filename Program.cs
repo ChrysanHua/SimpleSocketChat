@@ -13,13 +13,61 @@ namespace SocketSingleSend
     class Program
     {
         private const string ANSWER_FLAG = ">>OK<<";
+        private const string IP_FLAG = ">>IP<<";
         private const int MAX_BYTE_SIZE = 256;
-        static readonly IPAddress localIP = Dns.GetHostAddresses(Dns.GetHostName())[1];
-        static readonly int PORT = 10019;
-        static readonly int AS_PORT = 11019;
+        private const int PORT = 10019;
+        private const int AS_PORT = 11019;
+        static readonly IPAddress localIP = Dns.GetHostAddresses(Dns.GetHostName()).Last();
 
+        static bool sendFail = true;
         static Socket udpSender;
         static Socket udpReceiver;
+        static Dictionary<IPAddress, IPAddress> senderDic;
+
+        #region UtilMethod
+        static bool SteadySend(string str, IPEndPoint targetIPE)
+        {
+            int count = 3;
+            while (count > 0)
+            {
+                count--;
+                if (UDPSend(str, targetIPE))
+                {
+#if DEBUG
+                    Console.WriteLine("<<<<<<<<send '{0}' to: {1}", str, targetIPE);
+#endif
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        static IPAddress StrToIP(string ipStr)
+        {
+            try
+            {
+                return IPAddress.Parse(ipStr);
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message);
+#endif
+            }
+            return null;
+        }
+
+        static IPEndPoint CreateIPE(IPAddress ip, int port)
+        {
+            return new IPEndPoint(ip, port);
+        }
+
+        static EndPoint CreateEmptyEP()
+        {
+            return CreateIPE(IPAddress.Any, 0);
+        }
+
+        #endregion
 
         static void Main(string[] args)
         {
@@ -28,27 +76,17 @@ namespace SocketSingleSend
             Console.WriteLine("3. Loop Send ;");
 #endif
             Console.WriteLine("Make a choice to do(1 or 2):");
-            //实现IP检测，即通信开始前发送IP
 
             string choice = Console.ReadLine();
             if (choice == "1")
             {
                 //do Send
-                InitSocket("UDP", true);
+                InitSocket(true, true);
                 IPAddress targetIP = null;
-                bool flag = false;
-                while (!flag)
+                while (targetIP == null)
                 {
                     Console.WriteLine("Enter the other side's IP:");
-                    try
-                    {
-                        targetIP = IPAddress.Parse(Console.ReadLine());
-                        flag = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine(ex.Message);
-                    }
+                    targetIP = StrToIP(Console.ReadLine().Trim());
                 }
                 Console.WriteLine("Write down your text:");
                 Console.WriteLine("-----------------------------------");
@@ -73,7 +111,7 @@ namespace SocketSingleSend
             else if (choice == "2")
             {
                 //do Receive
-                InitSocket("UDP", false);
+                InitSocket(true, false);
                 Console.WriteLine("Local IP is: " + localIP);
                 Console.WriteLine("Waiting to receive the Msg...");
                 Console.WriteLine("-----------------------------------");
@@ -88,13 +126,16 @@ namespace SocketSingleSend
 #if DEBUG
             else if (choice == "3")
             {
-                //Loop Send Test
-                InitSocket("UDP", true);
+                //Loop Send for Test
+                InitSocket(true, true);
                 IPAddress targetIP = null;
                 string str = null;
                 int count = 0;
-                Console.WriteLine("Enter the other side's IP:");
-                targetIP = IPAddress.Parse(Console.ReadLine());
+                while (targetIP == null)
+                {
+                    Console.WriteLine("Enter the other side's IP:");
+                    targetIP = StrToIP(Console.ReadLine().Trim());
+                }
                 Console.WriteLine("-----------------------------------");
                 while (true)
                 {
@@ -112,40 +153,33 @@ namespace SocketSingleSend
 
         static string ReceiveText()
         {
-            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-            EndPoint remoteIPE = sender;
             //UDP Mode
+            EndPoint remoteIPE = CreateEmptyEP();
             string receiveStr = UDPReceive(ref remoteIPE);
-            if (receiveStr != null)
-            {
-                //Send answer
-                IPEndPoint answerIPE = (IPEndPoint)remoteIPE;
-                answerIPE.Port = AS_PORT;
-                int count = 3;
-                while (count > 0)
-                {
-                    count--;
-                    if (UDPSend(ANSWER_FLAG + receiveStr, answerIPE))
-                    {
-#if DEBUG
-                        Console.WriteLine("<<<<<<<<send '{0}' to: {1}", ANSWER_FLAG, answerIPE);
-#endif
-                        break;
-                    }
-                }
-            }
+            if (receiveStr == null)
+                return receiveStr;
+            //judge whether it is IP or not and check in
+            if (IPCheckIn(receiveStr, remoteIPE))
+                return null;
+            //get the useful IP
+            IPAddress answerIP = IPCheckOut(remoteIPE);
+            if (answerIP == null)
+                return receiveStr;
+            //Send answer
+            SteadySend(ANSWER_FLAG + receiveStr, CreateIPE(answerIP, AS_PORT));
             return receiveStr;
         }
 
         static bool SendText(string str, IPAddress targetIP)
         {
-            IPEndPoint targetIPE = new IPEndPoint(targetIP, PORT);
-            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-            EndPoint remoteIPE = sender;
             //UDP Mode
+            EndPoint remoteIPE = CreateEmptyEP();
+            //send localIP to Receiver if sendFail
+            if (sendFail)
+                SendIP(targetIP);
             //clean up the buffer
             FlushReceiveBuf();
-            if (UDPSend(str, targetIPE))
+            if (UDPSend(str, CreateIPE(targetIP, PORT)))
             {
                 //Receive answer
                 string answerStr = null;
@@ -157,9 +191,13 @@ namespace SocketSingleSend
 #endif
                     if (answerStr != null &&
                         answerStr.StartsWith(ANSWER_FLAG) && answerStr.EndsWith(str))
+                    {
+                        sendFail = false;
                         return true;
+                    }
                 } while (answerStr != null);
             }
+            sendFail = true;
             return false;
         }
 
@@ -200,10 +238,10 @@ namespace SocketSingleSend
             return null;
         }
 
-        static void InitSocket(string protocolMode, bool sendMode)
+        static void InitSocket(bool udpMode, bool sendMode)
         {
             //Init Socket
-            if (protocolMode == "UDP")
+            if (udpMode)
             {
                 udpReceiver = new Socket(AddressFamily.InterNetwork,
                     SocketType.Dgram, ProtocolType.Udp);
@@ -214,19 +252,21 @@ namespace SocketSingleSend
                 };
                 if (sendMode)
                 {
-                    udpReceiver.Bind(new IPEndPoint(localIP, AS_PORT));
+                    udpReceiver.Bind(CreateIPE(localIP, AS_PORT));
                     udpReceiver.ReceiveTimeout = 2500;
                 }
                 else
-                    udpReceiver.Bind(new IPEndPoint(localIP, PORT));
+                {
+                    udpReceiver.Bind(CreateIPE(localIP, PORT));
+                    senderDic = new Dictionary<IPAddress, IPAddress>();
+                }
             }
         }
 
         static void FlushReceiveBuf()
         {
             //this method will only be invoked before receiving a answer
-            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-            EndPoint remoteIPE = sender;
+            EndPoint remoteIPE = CreateEmptyEP();
             //clean up the Receive Buffer
             while (udpReceiver.Available != 0)
             {
@@ -237,6 +277,40 @@ namespace SocketSingleSend
                 UDPReceive(ref remoteIPE);
 #endif
             }
+        }
+
+        static IPAddress IPCheckOut(EndPoint remoteIPE)
+        {
+            //get the useful IP if it has been checked in
+            IPAddress remoteIP = ((IPEndPoint)remoteIPE).Address;
+            //check if the IP has been checked in
+            if (senderDic.ContainsKey(remoteIP))
+                return senderDic[remoteIP];
+            else
+                return null;
+        }
+
+        static bool IPCheckIn(string receiveStr, EndPoint remoteIPE)
+        {
+            //check in the Sender's IP
+            if (!receiveStr.StartsWith(IP_FLAG))
+                return false;
+            IPAddress receiveIP = null;
+            //Value
+            receiveIP = StrToIP(receiveStr.Substring(IP_FLAG.Length));
+            if (receiveIP == null)
+                return false;
+            //Key
+            IPAddress remoteIP = ((IPEndPoint)remoteIPE).Address;
+            senderDic[remoteIP] = receiveIP;
+            return true;
+        }
+
+        static void SendIP(IPAddress targetIP)
+        {
+            //this method will only be invoked before sending the text
+            //send localIP to the Receiver
+            SteadySend(IP_FLAG + localIP, CreateIPE(targetIP, PORT));
         }
 
     }
