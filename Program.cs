@@ -17,11 +17,15 @@ namespace SocketSingleSend
         private const int MAX_BYTE_SIZE = 256;
         private const int PORT = 10019;
         private const int AS_PORT = 11019;
+        private const int BC_PORT = 19019;
         static readonly IPAddress localIP = Dns.GetHostAddresses(Dns.GetHostName()).Last();
-
+        //实现广播自动连接 Ipv4
+        //实现不定长数据发送
+        //重构 抽出Socket通信类
         static bool sendFail = true;
         static Socket udpSender;
         static Socket udpReceiver;
+        static Socket broadcaster;
         static Dictionary<IPAddress, IPAddress> senderDic;
 
         #region UtilMethod
@@ -32,12 +36,7 @@ namespace SocketSingleSend
             {
                 count--;
                 if (UDPSend(str, targetIPE))
-                {
-#if DEBUG
-                    Console.WriteLine("<<<<<<<<send '{0}' to: {1}", str, targetIPE);
-#endif
                     return true;
-                }
             }
             return false;
         }
@@ -186,9 +185,6 @@ namespace SocketSingleSend
                 do
                 {
                     answerStr = UDPReceive(ref remoteIPE);
-#if DEBUG
-                    Console.WriteLine(">>>>>>>>>get '{0}' from: {1}", answerStr, remoteIPE);
-#endif
                     if (answerStr != null &&
                         answerStr.StartsWith(ANSWER_FLAG) && answerStr.EndsWith(str))
                     {
@@ -208,7 +204,12 @@ namespace SocketSingleSend
                 byte[] strByte = Encoding.UTF8.GetBytes(str);
                 int sendLen = udpSender.SendTo(strByte, SocketFlags.None, targetIPE);
                 if (sendLen == strByte.Length)
+                {
+#if DEBUG
+                    Console.WriteLine("<<<<<<<<send '{0}' to: {1}", str, targetIPE);
+#endif
                     return true;
+                }
             }
             catch (Exception ex)
             {
@@ -227,7 +228,13 @@ namespace SocketSingleSend
                 int receiveLen = udpReceiver.ReceiveFrom(strByte,
                     SocketFlags.None, ref remoteIPE);
                 if (receiveLen > 0)
-                    return Encoding.UTF8.GetString(strByte, 0, receiveLen);
+                {
+                    string msg = Encoding.UTF8.GetString(strByte, 0, receiveLen);
+#if DEBUG
+                    Console.WriteLine(">>>>>>>>get '{0}' from: {1}", msg, remoteIPE);
+#endif
+                    return msg;
+                }
             }
             catch (Exception ex)
             {
@@ -250,13 +257,20 @@ namespace SocketSingleSend
                 {
                     SendTimeout = 800
                 };
+                broadcaster = new Socket(AddressFamily.InterNetwork,
+                    SocketType.Dgram, ProtocolType.Udp)
+                {
+                    EnableBroadcast = true
+                };
                 if (sendMode)
                 {
+                    broadcaster.Bind(CreateIPE(localIP, BC_PORT));
                     udpReceiver.Bind(CreateIPE(localIP, AS_PORT));
                     udpReceiver.ReceiveTimeout = 2500;
                 }
                 else
                 {
+                    broadcaster.SendTimeout = 800;
                     udpReceiver.Bind(CreateIPE(localIP, PORT));
                     senderDic = new Dictionary<IPAddress, IPAddress>();
                 }
@@ -270,12 +284,7 @@ namespace SocketSingleSend
             //clean up the Receive Buffer
             while (udpReceiver.Available != 0)
             {
-#if DEBUG
-                Console.WriteLine("---------get '{0}' from: {1}",
-                    UDPReceive(ref remoteIPE), remoteIPE);
-#else
                 UDPReceive(ref remoteIPE);
-#endif
             }
         }
 
