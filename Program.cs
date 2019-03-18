@@ -14,6 +14,7 @@ namespace SocketSingleSend
     {
         private const string ANSWER_FLAG = ">>OK<<";
         private const string IP_FLAG = ">>IP<<";
+        private const string CRYPTO_KEY = "SimpleSocketChat";
         private const int MAX_STR_LEN = 120;
         private const int PORT = 10019;
         private const int AS_PORT = 11019;
@@ -59,6 +60,29 @@ namespace SocketSingleSend
 
         static void Main(string[] args)
         {
+            //while (true)
+            //{
+            //    string str = Console.ReadLine();
+            //    string key = "SimpleSocketChat";
+            //    //string iv = key;
+            //    //CryptoUtil.Init(key, iv);
+            //    //string enStr = CryptoUtil.Encrypt(str);
+            //    //Console.WriteLine(enStr);
+            //    //string deStr = CryptoUtil.Decrypt(enStr);
+            //    //Console.WriteLine(deStr);
+            //    //string hashStr = CryptoUtil.SHA256Hash(str);
+            //    //Console.WriteLine(hashStr);
+            //    byte[] a = CryptoUtil.StrToByte(str);
+            //    byte[] b = CryptoUtil.StrToByte(key);
+            //    b = Messenger.ConcatByte(a, b);
+            //    a = Messenger.SplitByte(b, a.Length, out b);
+            //    Console.WriteLine(CryptoUtil.ByteToStr(a));
+            //    Console.WriteLine(CryptoUtil.ByteToStr(b));
+            //    Console.WriteLine("-----------------------------");
+            //}
+
+
+
             Console.WriteLine("1. Send ;\r\n2. Receive ;");
 #if DEBUG
             Console.WriteLine("3. Loop Send ;");
@@ -165,7 +189,7 @@ namespace SocketSingleSend
             EndPoint remoteIPE = CreateEmptyEP();
             //send localIP to Receiver if sendFail
             if (sendFail)
-                SendLocalIP(targetIP);
+                udpSender.SteadySend(IP_FLAG + localIP, CreateIPE(targetIP, PORT));
             //clean up the buffer
             udpReceiver.FlushReceiveBuf();
             if (udpSender.UDPSend(str, CreateIPE(targetIP, PORT)))
@@ -184,6 +208,7 @@ namespace SocketSingleSend
 
         static void InitMessenger(bool udpMode, bool sendMode)
         {
+            CryptoUtil.Init(CRYPTO_KEY, CRYPTO_KEY);
             //Init Socket
             udpSender = new Messenger(udpMode);
             if (sendMode)
@@ -226,12 +251,6 @@ namespace SocketSingleSend
             return true;
         }
 
-        static void SendLocalIP(IPAddress targetIP)
-        {
-            //this method will only be invoked before sending the text
-            //send localIP to the Receiver
-            udpSender.SteadySend(IP_FLAG + localIP, CreateIPE(targetIP, PORT));
-        }
 
     }
 }

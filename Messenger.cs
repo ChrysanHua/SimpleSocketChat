@@ -10,10 +10,9 @@ namespace SocketSingleSend
 {
     class Messenger
     {
-        public const int MAX_BYTE_SIZE = 256;
+        public const int MAX_BYTE_SIZE = 512;
 
         private Socket socket;
-
 
         public Messenger(bool udpMode)
         {
@@ -113,7 +112,8 @@ namespace SocketSingleSend
 
         public bool UDPSend(string str, EndPoint targetIPE)
         {
-            return UDPSend(CryptoUtil.StrToByte(str), targetIPE);
+            //Encrypt here
+            return UDPSend(CryptoUtil.StrToByte(CryptoUtil.Encrypt(str)), targetIPE);
         }
 
         public bool SteadySend(string str, EndPoint targetIPE)
@@ -127,8 +127,6 @@ namespace SocketSingleSend
             }
             return false;
         }
-
-
 
 
         public byte[] UDPReceive(ref EndPoint remoteIPE, int byteSize)
@@ -202,7 +200,8 @@ namespace SocketSingleSend
             }
             if (receiveByte != null)
             {
-                string msg = CryptoUtil.ByteToStr(receiveByte);
+                //Decrypt here
+                string msg = CryptoUtil.Decrypt(CryptoUtil.ByteToStr(receiveByte));
 #if DEBUG
                 Console.WriteLine(">>>>>>>>get '{0}' from: {1}", msg, remoteIPE);
 #endif
