@@ -58,9 +58,12 @@ namespace SocketSingleSend
             return Encoding.UTF8.GetBytes(str);
         }
 
-        public static string ByteToStr(byte[] strByte)
+        public static string ByteToStr(byte[] strByte, int count = 0)
         {
-            return Encoding.UTF8.GetString(strByte);
+            if (count == 0)
+                return Encoding.UTF8.GetString(strByte);
+            else
+                return Encoding.UTF8.GetString(strByte, 0, count);
         }
 
         public static string ByteToBase64(byte[] strByte)
@@ -71,6 +74,26 @@ namespace SocketSingleSend
         public static byte[] Base64ToByte(string base64Str)
         {
             return Convert.FromBase64String(base64Str);
+        }
+
+        public static string ByteToHexStr(byte[] strByte)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (var item in strByte)
+            {
+                sb.Append(item.ToString("x2"));
+            }
+            return sb.ToString();
+        }
+
+        public static byte[] IntToByte(int num)
+        {
+            return BitConverter.GetBytes(num);
+        }
+
+        public static int ByteToInt(byte[] numByte)
+        {
+            return BitConverter.ToInt32(numByte, 0);
         }
 
         #endregion
@@ -166,6 +189,38 @@ namespace SocketSingleSend
             Init(key, iv);
             return Decrypt(enStr);
         }
+
+        #region HashMethod
+        public static byte[] SHA256Hash(byte[] strByte)
+        {
+            if (strByte == null || strByte.Length == 0)
+                throw new ArgumentNullException("strByte");
+            using (SHA256Managed sha = new SHA256Managed())
+            {
+                try
+                {
+                    byte[] hashByte = sha.ComputeHash(strByte);
+                    sha.Clear();
+                    return hashByte;
+                }
+#if DEBUG
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+#else
+                catch { }
+#endif
+            }
+            return strByte;
+        }
+
+        public static string SHA256Hash(string str)
+        {
+            return ByteToHexStr(SHA256Hash(StrToByte(str)));
+        }
+
+        #endregion
 
     }
 }
