@@ -4,13 +4,24 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SocketSingleSend
 {
     class Messenger
     {
+        class StateObject
+        {
+            public Socket workSocket;
+            public byte[] dataByte;
+            public IPEndPoint ipe;
+        }
+
+
         public const int MAX_BYTE_SIZE = 512;
+        public const int MIN_BYTE_SIZE = 64;
+        public const int BROADCAST_INTERVAL = 3000;
 
         private Socket socket;
 
@@ -101,10 +112,10 @@ namespace SocketSingleSend
                         return true;
                 }
             }
-            catch (Exception ex)
+            catch (SocketException ex)
             {
 #if DEBUG
-                Console.WriteLine(ex.Message);
+                Console.WriteLine(ex.Message + " errorCode: " + ex.ErrorCode);
 #endif
             }
             return false;
@@ -126,6 +137,53 @@ namespace SocketSingleSend
                     return true;
             }
             return false;
+        }
+
+        private void BroadcastCallback(IAsyncResult ar)
+        {
+            StateObject stateObj = (StateObject)ar.AsyncState;
+            try
+            {
+                int sendLen = stateObj.workSocket.EndSendTo(ar);
+#if DEBUG
+                Console.WriteLine("<<<<<<<<send one broadcast");
+#endif
+                if (sendLen == stateObj.dataByte.Length)
+                    Thread.Sleep(BROADCAST_INTERVAL);
+                stateObj.workSocket.BeginSendTo(stateObj.dataByte, 0, stateObj.dataByte.Length,
+                    SocketFlags.None, stateObj.ipe, BroadcastCallback, stateObj);
+            }
+            catch (SocketException ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message + " errorCode: " + ex.ErrorCode);
+#endif
+            }
+        }
+
+        public void Broadcasting(string bcStr, int bc_port)
+        {
+            if (!socket.EnableBroadcast)
+                socket.EnableBroadcast = true;
+            byte[] bcByte = CryptoUtil.StrToByte(CryptoUtil.Encrypt(bcStr));
+            IPEndPoint bcIPE = new IPEndPoint(IPAddress.Broadcast, bc_port);
+            StateObject stateObj = new StateObject()
+            {
+                dataByte = bcByte,
+                ipe = bcIPE,
+                workSocket = socket
+            };
+            try
+            {
+                socket.BeginSendTo(bcByte, 0, bcByte.Length, SocketFlags.None,
+                    bcIPE, new AsyncCallback(BroadcastCallback), stateObj);
+            }
+            catch (SocketException ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message + " errorCode: " + ex.ErrorCode);
+#endif
+            }
         }
 
 
@@ -155,17 +213,18 @@ namespace SocketSingleSend
                         byte[] remainByte = UDPReceive(ref remoteIPE, remainLen);
                         IPAddress afterIP = ((IPEndPoint)remoteIPE).Address;
                         if (!beforeIP.Equals(afterIP))
-                            throw new Exception("Information confusion between different senders");
+                            throw new Exception(
+                                "Information confusion between different senders");
                         else
                             strByte = ConcatByte(strByte, remainByte);
                     }
                     return strByte;
                 }
             }
-            catch (Exception ex)
+            catch (SocketException ex)
             {
 #if DEBUG
-                Console.WriteLine(ex.Message);
+                Console.WriteLine(ex.Message + " errorCode: " + ex.ErrorCode);
 #endif
             }
             return null;
@@ -232,7 +291,35 @@ namespace SocketSingleSend
             }
         }
 
-
+        public string ReceiveBroadcast(ref EndPoint remoteIPE)
+        {
+            if (!socket.EnableBroadcast)
+                socket.EnableBroadcast = true;
+            try
+            {
+                int byteSize = (MAX_BYTE_SIZE < MIN_BYTE_SIZE) ? MIN_BYTE_SIZE : MAX_BYTE_SIZE;
+                byte[] receiveByte = new byte[byteSize];
+                int receiveLen = socket.ReceiveFrom(receiveByte,
+                    SocketFlags.None, ref remoteIPE);
+                if (receiveLen > 0)
+                {
+                    string bcMsg = CryptoUtil.Decrypt(CryptoUtil.ByteToStr(
+                        receiveByte, receiveLen));
+#if DEBUG
+                    Console.WriteLine(">>>>>>>>get broadcast '{0}' from: {1}",
+                        bcMsg, remoteIPE);
+#endif
+                    return bcMsg;
+                }
+            }
+            catch (SocketException ex)
+            {
+#if DEBUG
+                Console.WriteLine(ex.Message + " errorCode: " + ex.ErrorCode);
+#endif
+            }
+            return null;
+        }
 
 
     }

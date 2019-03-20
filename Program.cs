@@ -2,8 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,10 +18,7 @@ namespace SocketSingleSend
         private const int AS_PORT = 11019;
         private const int BC_PORT = 19019;
         static readonly IPAddress localIP = Dns.GetHostAddresses(Dns.GetHostName()).Last();
-        //实现加密广播自动连接 Ipv4
-        //实现不定长数据发送
-        //重构 抽出Socket通信类
-        //answer使用hash值作对比
+
         static bool sendFail = true;
         static Messenger udpSender;
         static Messenger udpReceiver;
@@ -60,36 +55,13 @@ namespace SocketSingleSend
 
         static void Main(string[] args)
         {
-            //while (true)
-            //{
-            //    string str = Console.ReadLine();
-            //    string key = "SimpleSocketChat";
-            //    //string iv = key;
-            //    //CryptoUtil.Init(key, iv);
-            //    //string enStr = CryptoUtil.Encrypt(str);
-            //    //Console.WriteLine(enStr);
-            //    //string deStr = CryptoUtil.Decrypt(enStr);
-            //    //Console.WriteLine(deStr);
-            //    //string hashStr = CryptoUtil.SHA256Hash(str);
-            //    //Console.WriteLine(hashStr);
-            //    byte[] a = CryptoUtil.StrToByte(str);
-            //    byte[] b = CryptoUtil.StrToByte(key);
-            //    b = Messenger.ConcatByte(a, b);
-            //    a = Messenger.SplitByte(b, a.Length, out b);
-            //    Console.WriteLine(CryptoUtil.ByteToStr(a));
-            //    Console.WriteLine(CryptoUtil.ByteToStr(b));
-            //    Console.WriteLine("-----------------------------");
-            //}
-
-
-
             Console.WriteLine("1. Send ;\r\n2. Receive ;");
 #if DEBUG
             Console.WriteLine("3. Loop Send ;");
 #endif
             Console.WriteLine("Make a choice to do(1 or 2):");
 
-            string choice = Console.ReadLine();
+            string choice = Console.ReadLine().Trim();
             if (choice == "1")
             {
                 //do Send
@@ -97,21 +69,33 @@ namespace SocketSingleSend
                 IPAddress targetIP = null;
                 while (targetIP == null)
                 {
-                    Console.WriteLine("Enter the other side's IP:");
-                    targetIP = StrToIP(Console.ReadLine().Trim());
+                    Console.WriteLine("Enter the other side's IP or press Enter directly:");
+                    string ipStr = Console.ReadLine().Trim();
+                    if (string.IsNullOrEmpty(ipStr))
+                    {
+                        Console.WriteLine("Waiting to auto connect...");
+                        EndPoint remoteIPE = CreateEmptyEP();
+                        ipStr = broadcaster.ReceiveBroadcast(ref remoteIPE);
+                        if (ipStr != null && ipStr.StartsWith(IP_FLAG))
+                            ipStr = ipStr.Substring(IP_FLAG.Length);
+                    }
+                    targetIP = StrToIP(ipStr);
                 }
+                Console.WriteLine("Connect to Receiver: {0}", targetIP);
                 Console.WriteLine("Write down your text:");
                 Console.WriteLine("-----------------------------------");
                 string str = null;
                 do
                 {
                     str = Console.ReadLine();
-                    if (str.Length > MAX_STR_LEN)
+                    if (str == null)
+                        break;
+                    else if (str.Length > MAX_STR_LEN)
                     {
                         Console.WriteLine("<<<<<<<<<<<Too Long!");
                         continue;
                     }
-                    if (str.Length == 0)
+                    else if (str.Length == 0)
                     {
                         Console.WriteLine("<<<<<<<<<<<Can not be empty!");
                         continue;
@@ -126,6 +110,7 @@ namespace SocketSingleSend
                 InitMessenger(true, false);
                 Console.WriteLine("Local IP is: " + localIP);
                 Console.WriteLine("Waiting to receive the Msg...");
+                broadcaster.Broadcasting(IP_FLAG + localIP, BC_PORT);
                 Console.WriteLine("-----------------------------------");
                 string msg = null;
                 do
@@ -159,6 +144,7 @@ namespace SocketSingleSend
                 }
             }
 #endif
+            broadcaster?.Close();
             udpReceiver?.Close();
             udpSender?.Close();
         }
