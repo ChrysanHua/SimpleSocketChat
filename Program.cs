@@ -205,7 +205,7 @@ namespace SocketSingleSend
             else
             {
                 udpReceiver = new Messenger(udpMode, CreateIPE(localIP, PORT));
-                broadcaster = new Messenger(udpMode);
+                broadcaster = new Messenger(udpMode, CreateIPE(localIP, 0));
                 senderDic = new Dictionary<IPAddress, IPAddress>();
             }
         }
